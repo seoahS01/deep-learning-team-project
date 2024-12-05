@@ -1,10 +1,10 @@
 import json
 
 input_filepath = "/home/aix23606/seoah/JejuDialectSTT/data_sample/dataset.json"
-outputh_filepath = "/home/aix23606/seoah/JejuDialectSTT/data_sample/dataset_filepath_modified.json"
+outputh_filepath = "/home/aix23606/seoah/JejuDialectSTT/data_sample/dataset.json"
 
-original_path = "C:/Users/김우영\\Desktop/2024-2/딥러닝/project"
-replacement_path = ".."
+original_path = "/home/aix23606/seoah/JejuDialectSTT/data_sample/Trimmed_data_2인발화/Trimmed_data"
+replacement_path = "/home/aix23606/seoah/JejuDialectSTT/data_sample/Trimmed_data_2인발화"
 
 with open(input_filepath, "r", encoding="utf-8") as file:
     data = json.load(file)
