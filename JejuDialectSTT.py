@@ -233,3 +233,5 @@ with torch.no_grad():
 predicted_ids = torch.argmax(logits, dim=-1)
 transcription = processor.batch_decode(predicted_ids)
 print("Transcription:", transcription[0])
+
+print("haha")
