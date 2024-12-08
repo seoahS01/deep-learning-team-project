@@ -20,7 +20,7 @@ if torch.cuda.is_available():
 else:
     print("GPU is not available, using CPU.")
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "4, 5"
+os.environ["CUDA_VISIBLE_DEVICES"] = "5"
 
 # Step 1: 데이터 로드 및 전처리
 def load_data(json_file):
@@ -219,9 +219,8 @@ print("Decoded Ground Truth:", ground_truth_decoded)  # 디버깅: 디코딩된 
 transcription = processor.batch_decode(predicted_ids)[0]
 print("Prediction:", transcription)  # 디코딩된 예측 출력
 
-# 추가된 오디오 파일 예측 테스트
 # 오디오 파일 로드
-audio_input, sampling_rate = sf.read("talk_set1_collectorjj14_speakerjj59_speakerjj60_4_0_121order_1.0.wav")
+audio_input, sampling_rate = sf.read("/home/aix23606/seoah/JejuDialectSTT/data_sample/Trimmed_data_2인발화/talk_set1_collectorjj14_speakerjj59_speakerjj60_4_0_121order_1.0.wav")
 # 샘플링 레이트 확인
 if sampling_rate != 16000:
     raise ValueError("모델은 16kHz 샘플링 레이트를 기대합니다. 오디오 파일을 리샘플링하세요.")
