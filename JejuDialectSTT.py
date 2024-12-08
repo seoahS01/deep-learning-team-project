@@ -94,17 +94,16 @@ def prepare_dataset(batch):
         # 라벨 처리
         labels = processor.tokenizer(batch["text"], return_tensors="pt", padding=True).input_ids
 
-        # 각 단계별로 데이터 출력 (디버깅용)
-        print("Input values shape:", input_values.shape)
-        print("Labels shape:", labels.shape)
+        # 디버깅: 라벨 출력
+        print("Decoded label:", processor.tokenizer.decode(labels[0].tolist(), skip_special_tokens=True))
 
-        # 배치에 input_values와 labels 추가
         batch["input_values"] = input_values[0]
         batch["labels"] = labels[0]
     except Exception as e:
         print("Error in prepare_dataset:", e)
         raise e
     return batch
+
 
 try:
     train_dataset = train_dataset.map(prepare_dataset,
@@ -128,7 +127,7 @@ training_args = TrainingArguments(
     per_device_train_batch_size=4,  # GPU 메모리 문제를 피하기 위해 배치 크기 감소
     evaluation_strategy="epoch",
     num_train_epochs=10,
-    fp16=True,  # GPU 성능 최적화를 위해 FP16 사용
+    fp16=False,  # GPU 성능 최적화를 위해 FP16 사용
     max_grad_norm=1.0,
     save_steps=1000,  # GPU 메모리 및 저장 공간을 고려하여 저장 주기 증가
     eval_steps=1000,  # 평가 주기 증가
@@ -139,7 +138,7 @@ training_args = TrainingArguments(
     gradient_accumulation_steps=2,  # 배치 크기를 줄였으므로 누적 스텝 증가
     dataloader_num_workers=2,  # 데이터 로드 속도 조절을 위해 워커 수 감소
     report_to="wandb",
-    gradient_checkpointing=True  # 메모리 절약을 위해 gradient checkpointing 활성화
+    gradient_checkpointing=False  # 메모리 절약을 위해 gradient checkpointing 활성화
 )
 
 model = model.to("cuda")
@@ -201,14 +200,14 @@ processor.save_pretrained("./stt_model")
 
 print("Training complete and model saved!")
 
-# Step 9: 테스트 데이터 중 하나로 예측 확인
-test_sample = test_dataset[0]
-input_values = torch.tensor(test_sample["input_values"]).unsqueeze(0).to("cuda")
+# Step 9: 트레인 데이터 중 하나로 예측 확인
+train_sample = train_dataset[0]
+input_values = torch.tensor(train_sample["input_values"]).unsqueeze(0).to("cuda")
 with torch.no_grad():
-    logits = model(input_values).logits
+    logits = model(input_values).logitsㄹ
 predicted_ids = torch.argmax(logits, dim=-1)
 transcription = processor.batch_decode(predicted_ids)[0]
 
-print("Test sample transcription:")
-print("Ground truth:", test_sample["labels"])
+print("Train sample transcription:")
+print("Ground truth:", train_sample["labels"])
 print("Prediction:", transcription)
