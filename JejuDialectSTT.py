@@ -9,7 +9,9 @@ import wandb
 from transformers import DataCollatorWithPadding
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Union
-import torch
+from jiwer import wer
+from transformers import IntervalStrategy
+
 
 wandb.init(project="jejudialectstt")
 
@@ -20,7 +22,7 @@ if torch.cuda.is_available():
 else:
     print("GPU is not available, using CPU.")
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "5"
+os.environ["CUDA_VISIBLE_DEVICES"] = "4, 5, 6"
 
 # Step 1: 데이터 로드 및 전처리
 def load_data(json_file):
@@ -71,10 +73,6 @@ try:
     train_dataset = train_valid_split['train']
     valid_dataset = train_valid_split['test']
 
-    # # 데이터셋 크기를 제한 -> 110개만 학습 돌려보기
-    # train_dataset = train_dataset.select(range(100))  # 첫 100개의 샘플만 사용
-    # valid_dataset = valid_dataset.select(range(10))  # 첫 10개의 샘플만 사용
-
 except Exception as e:
     print(f"Error during dataset split: {e}")
     raise e
@@ -92,18 +90,12 @@ def prepare_dataset(batch):
         labels = processor.tokenizer(batch["text"], return_tensors="pt", padding=True).input_ids
         labels[labels == processor.tokenizer.pad_token_id] = -100
 
-        # 디버깅: 라벨 출력
-        print("Decoded label:", processor.tokenizer.decode(labels[0].tolist(), skip_special_tokens=True))
-        print("Input text:", batch["text"])
-        print("Labels shape:", labels.shape)
-
         batch["input_values"] = input_values[0]
         batch["labels"] = labels[0]
     except Exception as e:
         print("Error in prepare_dataset:", e)
         raise e
     return batch
-
 
 try:
     train_dataset = train_dataset.map(prepare_dataset,
@@ -124,22 +116,22 @@ model.freeze_feature_encoder()
 training_args = TrainingArguments(
     output_dir="./stt_model",
     group_by_length=True,
-    per_device_train_batch_size=4,  # GPU 메모리 문제를 피하기 위해 배치 크기 감소
-    evaluation_strategy="epoch",
+    per_device_train_batch_size=4,
+    evaluation_strategy=IntervalStrategy.EPOCH,  # 매 epoch 마다 평가
+    logging_strategy=IntervalStrategy.EPOCH,    # 매 epoch 마다 train loss 기록
     num_train_epochs=10,
-    fp16=False,  # GPU 성능 최적화를 위해 FP16 사용
+    fp16=False,
     max_grad_norm=1.0,
-    save_steps=1000,  # GPU 메모리 및 저장 공간을 고려하여 저장 주기 증가
-    eval_steps=1000,  # 평가 주기 증가
-    logging_steps=200,  # 로깅 주기 증가
+    save_steps=1000,
     learning_rate=1e-5,
     warmup_steps=500,
     save_total_limit=2,
-    gradient_accumulation_steps=2,  # 배치 크기를 줄였으므로 누적 스텝 증가
-    dataloader_num_workers=2,  # 데이터 로드 속도 조절을 위해 워커 수 감소
+    gradient_accumulation_steps=2,
+    dataloader_num_workers=2,
     report_to="wandb",
-    gradient_checkpointing=False  # 메모리 절약을 위해 gradient checkpointing 활성화
+    gradient_checkpointing=False
 )
+
 
 model = model.to("cuda")
 
@@ -200,38 +192,49 @@ processor.save_pretrained("./stt_model")
 
 print("Training complete and model saved!")
 
-# Step 9: 트레인 데이터 중 하나로 예측 확인
-train_sample = train_dataset[0]  # 트레인 데이터 중 하나를 가져옵니다.
-input_values = torch.tensor(train_sample["input_values"]).unsqueeze(0).to("cuda")  # 입력값 변환 및 GPU로 이동
+# Step 9: 테스트 데이터로 예측 확인 및 WandB 로깅
+def evaluate_and_log_test_data(test_dataset):
+    test_results = []
+    correct = 0
 
-with torch.no_grad():
-    logits = model(input_values).logits  # 모델로부터 logits 출력
-    print("Logits shape:", logits.shape)  # 디버깅: logits의 차원 출력
-    print("Logits:", logits)  # 디버깅: logits 출력
-    predicted_ids = torch.argmax(logits, dim=-1)  # 가장 높은 확률의 ID 추출
-    print("Predicted IDs:", predicted_ids)  # 디버깅: 예측된 ID 출력
+    for idx, test_sample in enumerate(test_dataset):
+        input_values = torch.tensor(test_sample["input_values"]).unsqueeze(0).to("cuda")
+        with torch.no_grad():
+            logits = model(input_values).logits
+        predicted_ids = torch.argmax(logits, dim=-1)
+        prediction = processor.batch_decode(predicted_ids, skip_special_tokens=True)[0]
+        ground_truth = processor.decode(test_sample["labels"], skip_special_tokens=True)
 
-# 라벨 디코딩
-ground_truth_decoded = processor.batch_decode([train_sample["labels"]], skip_special_tokens=True)[0]
-print("Decoded Ground Truth:", ground_truth_decoded)  # 디버깅: 디코딩된 라벨 출력
+        # 빈 문자열 예외 처리
+        if not prediction:
+            prediction = "<empty>"
 
-# 예측값 디코딩
-transcription = processor.batch_decode(predicted_ids)[0]
-print("Prediction:", transcription)  # 디코딩된 예측 출력
+        # 정확도 계산
+        if prediction == ground_truth:
+            correct += 1
 
-# 오디오 파일 로드
-audio_input, sampling_rate = sf.read("/home/aix23606/seoah/JejuDialectSTT/data_sample/Trimmed_data_2인발화/talk_set1_collectorjj14_speakerjj59_speakerjj60_4_0_121order_1.0.wav")
-# 샘플링 레이트 확인
-if sampling_rate != 16000:
-    raise ValueError("모델은 16kHz 샘플링 레이트를 기대합니다. 오디오 파일을 리샘플링하세요.")
-# 오디오 전처리
-input_values = processor(audio_input, sampling_rate=16000, return_tensors="pt", padding=True).input_values
-# 모델 추론
-with torch.no_grad():
-    logits = model(input_values).logits
-# 예측된 토큰 ID를 텍스트로 디코딩
-predicted_ids = torch.argmax(logits, dim=-1)
-transcription = processor.batch_decode(predicted_ids)
-print("Transcription:", transcription[0])
+        # 파일명 추출
+        file_name = test_sample.get("audio_filepath", f"sample_{idx}")
 
-print("haha")
+        # 결과 저장
+        test_results.append({
+            "file": file_name,
+            "ground_truth": ground_truth,
+            "prediction": prediction
+        })
+
+    accuracy = (correct / len(test_dataset)) * 100  # 정확도를 퍼센트로 계산
+
+    # WandB 로깅
+    wandb.log({
+        "test_results": wandb.Table(
+            columns=["file", "ground_truth", "prediction"],
+            data=[[res["file"], res["ground_truth"], res["prediction"]] for res in test_results]
+        ),
+        "test_accuracy": accuracy
+    })
+
+    print(f"Test Accuracy: {accuracy}%")
+
+# 테스트 실행
+evaluate_and_log_test_data(test_dataset)
